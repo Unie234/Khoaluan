@@ -752,7 +752,8 @@ class _VocabularyListScreenState extends State<VocabularyListScreen> {
     }
 
     try {
-      final audioUrl = "${AppConfig.baseUrl}/audio/$audioFile";
+      final audioUrl =
+      "${AppConfig.storageUrl}/audio/${Uri.encodeComponent(audioFile.trim())}";
       await _audioPlayer.stop();
       await _audioPlayer.play(UrlSource(audioUrl));
     } catch (_) {

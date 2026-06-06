@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
+// ignore: unused_import
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/api_service.dart';
+// ignore: unused_import
 import '../services/learning_progress_service.dart';
 import 'vocabulary_list_screen.dart';
+
 
 class LearningScreen extends StatelessWidget {
   const LearningScreen({super.key});
@@ -10,30 +14,25 @@ class LearningScreen extends StatelessWidget {
   static const Color _ink = Color(0xFF0B302B);
   static const Color _green = Color(0xFF2F8E58);
 
-  Future<List<_TopicCardData>> _loadTopicCards() async {
-    final topics = await ApiService.getTopics();
-    final cards = await Future.wait(
-      topics.map((topic) async {
-        final topicId = int.tryParse(topic.id) ?? 0;
-        final words = topicId > 0
-            ? await ApiService.getVocabularyByTopic(topicId)
-            : <dynamic>[];
-        final progress = await LearningProgressService.topicProgress(
-          topicId: topicId,
-          title: topic.title,
-          total: words.length,
-        );
+Future<List<_TopicCardData>> _loadTopicCards() async {
+  final prefs = await SharedPreferences.getInstance();
+  final userId = prefs.getString('user_id') ?? '';
 
-        return _TopicCardData(
-          topic: topic,
-          learned: progress.learned,
-          total: words.length,
-        );
-      }),
+  final rows = await ApiService.getLearningTopics(userId);
+
+  return rows.map((row) {
+    final data = Map<String, dynamic>.from(row);
+
+    return _TopicCardData(
+      topic: Topic(
+        id: data['id'].toString(),
+        title: data['title'].toString(),
+      ),
+      learned: int.tryParse(data['learned'].toString()) ?? 0,
+      total: int.tryParse(data['total'].toString()) ?? 0,
     );
-
-    return cards;
-  }
+  }).toList();
+}
 
   @override
   Widget build(BuildContext context) {

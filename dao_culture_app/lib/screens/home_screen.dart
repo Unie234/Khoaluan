@@ -31,6 +31,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _streakCount = "0";
   String _avatarUrl = "";
   String _displayName = "Khách";
+  bool _hasUnreadNotifications = false;
   bool _checkedStreakRescue = false;
   late ConfettiController _confettiController;
 
@@ -45,6 +46,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     _loadProgress();
     _loadUserProfile();
+    _loadUnreadNotifications();
   }
 
   @override
@@ -81,6 +83,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (_isLoggedIn) {
       _loadUserProfile();
+      _loadUnreadNotifications();
     }
   }
 
@@ -125,8 +128,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (result['status'] == 'success') {
       final fullName = (result['full_name'] ?? "").toString().trim();
+      final avatar = (result['avatar'] ?? "").toString().trim();
       setState(() {
-        _avatarUrl = (result['avatar'] ?? "").toString();
+        _avatarUrl = avatar.isEmpty ? "" : _withCacheVersion(avatar);
         _displayName = fullName.isNotEmpty
             ? fullName
             : _displayNameFromUsername(_username);
@@ -134,6 +138,42 @@ class _HomeScreenState extends State<HomeScreen> {
       await prefs.setString('full_name', fullName);
       _checkStreakRescue(userId);
     }
+  }
+
+  String _withCacheVersion(String url) {
+    final separator = url.contains('?') ? '&' : '?';
+    return '$url${separator}v=${DateTime.now().millisecondsSinceEpoch}';
+  }
+
+  Future<void> _loadUnreadNotifications() async {
+    if (!_isLoggedIn) {
+      if (mounted) {
+        setState(() => _hasUnreadNotifications = false);
+      }
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString('user_id') ?? "";
+
+    if (userId.isEmpty) {
+      if (mounted) {
+        setState(() => _hasUnreadNotifications = false);
+      }
+      return;
+    }
+
+    final notifications = await ApiService.getNotifications(
+      userId: userId,
+      limit: 50,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _hasUnreadNotifications = notifications.any(
+        (notification) => !notification.isRead,
+      );
+    });
   }
 
   Future<void> _checkStreakRescue(String userId) async {
@@ -215,6 +255,8 @@ class _HomeScreenState extends State<HomeScreen> {
         streakCount: _streakCount,
         username: _displayName,
         avatarUrl: _avatarUrl,
+        hasUnreadNotifications: _hasUnreadNotifications,
+        onNotificationsChanged: _loadUnreadNotifications,
       ),
       CultureTab(initialCategory: _targetCategory),
       const CulturalMapScreen(),
@@ -231,6 +273,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _displayName = "Khách";
               _streakCount = "0"; // Ép về 0 khi Logout
               _avatarUrl = "";
+              _hasUnreadNotifications = false;
               _selectedIndex = 0;
               _targetCommunityPostId = "";
             });
@@ -310,7 +353,10 @@ class _HomeScreenState extends State<HomeScreen> {
           _targetCategory = "Tất cả";
           _targetCommunityPostId = "";
         });
-        if (index == 0 && _isLoggedIn) _loadUserProfile();
+        if (index == 0 && _isLoggedIn) {
+          _loadUserProfile();
+          _loadUnreadNotifications();
+        }
       },
       items: [
         const BottomNavigationBarItem(

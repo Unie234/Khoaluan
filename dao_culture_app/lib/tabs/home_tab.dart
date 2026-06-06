@@ -25,6 +25,8 @@ class HomeTab extends StatelessWidget {
   final String streakCount;
   final String username;
   final String avatarUrl;
+  final bool hasUnreadNotifications;
+  final VoidCallback? onNotificationsChanged;
 
   const HomeTab({
     super.key,
@@ -35,6 +37,8 @@ class HomeTab extends StatelessWidget {
     this.streakCount = "0",
     this.username = "Khách",
     this.avatarUrl = "",
+    this.hasUnreadNotifications = false,
+    this.onNotificationsChanged,
   });
 
   static const Color _ink = Color(0xFF12356A);
@@ -206,17 +210,18 @@ class HomeTab extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               GestureDetector(
-                onTap: () {
+                onTap: () async {
                   if (!isLoggedIn) {
                     _showLoginRequired(context, "xem thông báo");
                     return;
                   }
-                  Navigator.push(
+                  await Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (_) => const NotificationsScreen(),
                     ),
                   );
+                  onNotificationsChanged?.call();
                 },
                 child: Container(
                   width: 42,
@@ -237,18 +242,19 @@ class HomeTab extends StatelessWidget {
                       const Center(
                         child: Icon(Icons.notifications_none_rounded, size: 22),
                       ),
-                      Positioned(
-                        right: 10,
-                        top: 9,
-                        child: Container(
-                          width: 8,
-                          height: 8,
-                          decoration: const BoxDecoration(
-                            color: _red,
-                            shape: BoxShape.circle,
+                      if (hasUnreadNotifications)
+                        Positioned(
+                          right: 10,
+                          top: 9,
+                          child: Container(
+                            width: 8,
+                            height: 8,
+                            decoration: const BoxDecoration(
+                              color: _red,
+                              shape: BoxShape.circle,
+                            ),
                           ),
                         ),
-                      ),
                     ],
                   ),
                 ),
@@ -1139,22 +1145,18 @@ class HomeTab extends StatelessWidget {
   }
 
   Future<List<TopicLearningProgress>> _loadInProgressTopics() async {
-    final topics = await ApiService.getTopics();
-    final progress = await Future.wait(
-      topics.map((topic) async {
-        final topicId = int.tryParse(topic.id) ?? 0;
-        final words = topicId > 0
-            ? await ApiService.getVocabularyByTopic(topicId)
-            : <Map<String, dynamic>>[];
-        return LearningProgressService.topicProgress(
-          topicId: topicId,
-          title: topic.title,
-          total: words.length,
-        );
-      }),
-    );
+    if (!isLoggedIn) return [];
 
-    return progress
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString('user_id') ?? '';
+
+    if (userId.isEmpty) return [];
+
+    final rows = await ApiService.getLearningTopics(userId);
+
+    return rows
+        .whereType<Map<String, dynamic>>()
+        .map(TopicLearningProgress.fromJson)
         .where(
           (topic) =>
               topic.total > 0 &&
@@ -2086,18 +2088,13 @@ class HomeTab extends StatelessWidget {
   }
 
   static String _normalizeCultureImageUrl(String value) {
-    final text = value.trim();
+    final text = value.trim().replaceAll('\\', '/');
     if (text.isEmpty) return "";
 
-    const marker = '/uploads/culture/';
-    final markerIndex = text.indexOf(marker);
-    if (markerIndex != -1) {
-      final fileName = text.substring(markerIndex + marker.length);
-      return '${CultureArticleService.baseUrl}/culture_articles/image.php?file=${Uri.encodeComponent(fileName)}';
-    }
-
-    if (text.startsWith('uploads/culture/')) {
-      final fileName = text.substring('uploads/culture/'.length);
+    const cultureMarker = 'uploads/culture/';
+    final markerIndex = text.indexOf(cultureMarker);
+    if (markerIndex >= 0) {
+      final fileName = text.substring(markerIndex + cultureMarker.length);
       return '${CultureArticleService.baseUrl}/culture_articles/image.php?file=${Uri.encodeComponent(fileName)}';
     }
 
@@ -2508,15 +2505,31 @@ class HomeTab extends StatelessWidget {
   }
 
   static String _normalizePostMediaUrl(String value) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty) return '';
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-      return trimmed;
+    final text = value.trim().replaceAll('\\', '/');
+    if (text.isEmpty) return '';
+
+    final uri = Uri.tryParse(text);
+    final path = uri?.path ?? text;
+    final fileName = path
+        .split('/')
+        .where((part) => part.isNotEmpty)
+        .lastOrNull;
+
+    if (fileName != null &&
+        (path.contains('/uploads/') ||
+            path.startsWith('uploads/') ||
+            path.contains('/storage/'))) {
+      return '${ApiService.baseUrl}/posts/image.php'
+          '?file=${Uri.encodeComponent(fileName)}';
     }
-    final clean = trimmed
-        .replaceAll('\\', '/')
-        .replaceFirst(RegExp(r'^/+'), '');
-    return '${ApiService.baseUrl}/$clean';
+
+    if (text.startsWith('http://') || text.startsWith('https://')) {
+      return text;
+    }
+
+    if (fileName == null) return '';
+    return '${ApiService.baseUrl}/posts/image.php'
+        '?file=${Uri.encodeComponent(fileName)}';
   }
 
   Future<void> _saveHomeArticle(

@@ -3,6 +3,10 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+// ignore: duplicate_import
+import 'package:flutter/foundation.dart';
+// ignore: unused_import
+import 'package:image_picker/image_picker.dart';
 
 import '../app_config.dart';
 import '../models/app_notification.dart';
@@ -774,28 +778,56 @@ class ApiService {
 
   static Future<Map<String, dynamic>> uploadAvatar(
     String userId,
-    String filePath,
+    XFile file,
   ) async {
     try {
       final request = http.MultipartRequest(
         'POST',
         Uri.parse('$baseUrl/users/upload_avatar.php'),
       );
+
       request.fields['user_id'] = userId;
-      request.files.add(await http.MultipartFile.fromPath('avatar', filePath));
+
+      if (kIsWeb) {
+        final bytes = await file.readAsBytes();
+
+        request.files.add(
+          http.MultipartFile.fromBytes(
+            'avatar',
+            bytes,
+            filename: file.name.isNotEmpty ? file.name : 'avatar.jpg',
+          ),
+        );
+      } else {
+        request.files.add(
+          await http.MultipartFile.fromPath(
+            'avatar',
+            file.path,
+            filename: file.name,
+          ),
+        );
+      }
 
       final streamedResponse = await request.send().timeout(
         const Duration(seconds: 30),
       );
+
       final response = await http.Response.fromStream(streamedResponse);
 
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+
       if (response.statusCode == 200) {
-        return _decodeMapResponse(response.body, 'changePassword') ??
-            {"status": "error", "message": "Dữ liệu đổi mật khẩu không hợp lệ"};
+        return data;
       }
-      return {"status": "error", "message": "Không tải được ảnh"};
+
+      return {
+        'status': 'error',
+        'message': data['message'] ?? 'Không tải được ảnh',
+      };
     } catch (e) {
-      return {"status": "error", "message": "Lỗi kết nối khi tải ảnh"};
+      debugPrint('Lỗi uploadAvatar: $e');
+
+      return {'status': 'error', 'message': 'Lỗi tải ảnh: $e'};
     }
   }
 
@@ -1105,51 +1137,28 @@ class ApiService {
 
   // 🟢 HÀM "BỘ NÃO" GEMINI AI (MỚI THÊM)
   static Future<String> chatWithDaoAssistant(String userMessage) async {
-    const String apiKey = AppConfig.geminiApiKey;
-
-    // 🔥 ĐÃ ĐỔI TÊN CHÍNH XÁC: gemini-2.5-flash
-    final url = Uri.parse(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey',
-    );
-
-    // 📦 Prompt nền: giới hạn phạm vi app, còn yêu cầu chi tiết nằm trong userMessage
-    final Map<String, dynamic> requestBody = {
-      "contents": [
-        {
-          "parts": [
-            {
-              "text":
-                  "Bạn là trợ lý AI của ứng dụng tìm hiểu văn hóa người Dao tại Việt Nam. "
-                  "Hãy ưu tiên làm đúng theo yêu cầu, ngữ cảnh và dữ liệu được gửi trong nội dung bên dưới. "
-                  "Chỉ trả lời các nội dung liên quan đến văn hóa Dao, học tập trong app, phong tục, lễ hội, trang phục, ẩm thực, thảo dược, ngôn ngữ và cộng đồng. "
-                  "Nếu dữ liệu hoặc câu hỏi nêu nhóm Dao cụ thể như Dao Đỏ thì phải giữ đúng tên nhóm đó; nếu không nêu nhóm cụ thể thì trả lời ở mức người Dao nói chung và nhắc rằng có thể khác nhau theo nhóm hoặc địa phương khi cần. "
-                  "Không trả lời toán học, lập trình hoặc chủ đề không liên quan đến ứng dụng. "
-                  "Trả lời bằng tiếng Việt, ngắn gọn, tự nhiên, không dùng markdown nếu không được yêu cầu. "
-                  "Nội dung cần xử lý:\n$userMessage",
-            },
-          ],
-        },
-      ],
-    };
-
     try {
       final response = await http
           .post(
-            url,
+            Uri.parse('$baseUrl/ai/chat.php'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode(requestBody),
+            body: jsonEncode({'message': userMessage}),
           )
-          .timeout(const Duration(seconds: 30));
+          .timeout(const Duration(seconds: 40));
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['candidates'][0]['content']['parts'][0]['text'];
-      } else {
-        debugPrint("Lỗi từ Google: ${response.body}");
-        return "Già làng đang bận đi nương rồi, Bạn thử lại sau nhé!";
+      final data = _decodeMapResponse(response.body, 'chatWithDaoAssistant');
+      if (response.statusCode == 200 && data?['status'] == 'success') {
+        return (data?['text'] ?? '').toString();
       }
+
+      final message = data?['message']?.toString().trim() ?? '';
+      debugPrint("Lỗi Gemini backend ${response.statusCode}: ${response.body}");
+      return message.isNotEmpty
+          ? message
+          : "Không thể kết nối với trợ lý AI lúc này.";
     } catch (e) {
-      return "Lỗi kết nối mạng rồi Bạn ơi!";
+      debugPrint("Lỗi chatWithDaoAssistant: $e");
+      return "Không kết nối được với máy chủ trợ lý AI.";
     }
   }
 
@@ -1314,6 +1323,23 @@ class ApiService {
     } catch (e) {
       debugPrint("Lỗi toggleDictionaryFavorite: $e");
       return false;
+    }
+  }
+
+  static Future<List<dynamic>> getLearningTopics(String userId) async {
+    try {
+      final response = await http
+          .get(Uri.parse('$baseUrl/progress/topics.php?user_id=$userId'))
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode != 200) return [];
+
+      final data = _decodeMapResponse(response.body, 'getLearningTopics');
+
+      return data?['data'] is List ? data!['data'] as List<dynamic> : [];
+    } catch (e) {
+      debugPrint('Lỗi getLearningTopics: $e');
+      return [];
     }
   }
 }

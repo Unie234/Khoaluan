@@ -1,7 +1,9 @@
 class AppConfig {
-  static const String geminiApiKey =
-      'AIzaSyCymXotUjhqfHN3nGcc_PId2OsE0pT1uFI'; // Key của Uyên
+  static const String geminiApiKey = 'API_KEY_CUA_BAN';
 
-  static const String baseUrl = 'http://192.168.1.3:8080/dao_api';
+  static const String serverUrl = 'http://localhost:8000';
+  static const String baseUrl = '$serverUrl/api';
+  static const String storageUrl = '$serverUrl/storage';
+
   static const String defaultUsername = 'Khách';
 }

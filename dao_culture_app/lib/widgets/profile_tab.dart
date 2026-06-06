@@ -139,36 +139,56 @@ class _ProfileTabState extends State<ProfileTab> {
     }
   }
 
-  Future<void> _pickAndUploadAvatar() async {
-    if (_userId.isEmpty || _isUploadingAvatar) return;
+Future<void> _pickAndUploadAvatar() async {
+  if (_userId.isEmpty || _isUploadingAvatar) return;
 
-    final pickedFile = await _picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 85,
+  final pickedFile = await _picker.pickImage(
+    source: ImageSource.gallery,
+    imageQuality: 85,
+  );
+
+  if (pickedFile == null || !mounted) return;
+
+  setState(() => _isUploadingAvatar = true);
+
+  final result = await ApiService.uploadAvatar(
+    _userId,
+    pickedFile,
+  );
+
+  if (!mounted) return;
+
+  if (result['status'] == 'success') {
+    final newAvatar =
+        (result['avatar_url'] ?? result['avatar'] ?? '').toString();
+
+    setState(() {
+      _isUploadingAvatar = false;
+      final separator = newAvatar.contains('?') ? '&' : '?';
+      _avatarUrl =
+          '$newAvatar${separator}v=${DateTime.now().millisecondsSinceEpoch}';
+    });
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('avatar', newAvatar);
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Đã cập nhật ảnh đại diện')),
     );
-    if (pickedFile == null) return;
+  } else {
+    setState(() => _isUploadingAvatar = false);
 
-    if (!mounted) return;
-    setState(() => _isUploadingAvatar = true);
-
-    final result = await ApiService.uploadAvatar(_userId, pickedFile.path);
-    if (!mounted) return;
-
-    if (result['status'] == 'success') {
-      setState(() {
-        _avatarUrl = (result['avatar'] ?? "").toString();
-        _isUploadingAvatar = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Đã cập nhật ảnh đại diện!")),
-      );
-    } else {
-      setState(() => _isUploadingAvatar = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result['message'] ?? "Không tải được ảnh")),
-      );
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          result['message']?.toString() ?? 'Không tải được ảnh',
+        ),
+      ),
+    );
   }
+}
 
   void _showChangePasswordDialog() {
     final oldPasswordController = TextEditingController();
